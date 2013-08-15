@@ -4,7 +4,7 @@ defrecord ExDoc.ModuleNode, module: nil, relative: nil, moduledoc: nil,
 defrecord ExDoc.FunctionNode, name: nil, arity: 0, id: nil,
   doc: [], source: nil, type: nil, line: 0, signature: nil, specs: nil
 
-defrecord ExDoc.TypeNode, name: nil, id: nil, spec: nil
+defrecord ExDoc.TypeNode, name: nil, id: nil, type: nil, spec: nil
 
 defmodule ExDoc.Retriever do
   defexception Error, message: nil
@@ -85,12 +85,15 @@ defmodule ExDoc.Retriever do
     source_path = source_path(module, config)
 
     specs = Kernel.Typespec.beam_specs(module)
-    types_raw = Kernel.Typespec.beam_types(module) |> Enum.map(elem(&1, 1)) |> Enum.sort
-    typespecs = lc {name, _, _} = tup inlist types_raw do
-                  ExDoc.TypeNode[name: atom_to_binary(name),
-                                 id: "t:#{name}",
-                                 spec: tup] 
-                end
+
+    typespecs_ = lc {type, {name, _, _} = tup} inlist Kernel.Typespec.beam_types(module) do
+                   ExDoc.TypeNode[name: atom_to_binary(name),
+                                  id: "t:#{name}",
+                                  type: type,
+                                  spec: tup] 
+                 end
+    typespecs = Enum.filter(typespecs_, &(&1.type != :typep)) |> 
+                  Enum.sort(&(&1.name > &2.name))
 
     docs = Enum.filter_map module.__info__(:docs), &has_doc?(&1, type),
       &get_function(&1, source_path, source_url, specs)
@@ -109,7 +112,7 @@ defmodule ExDoc.Retriever do
       type: type,
       moduledoc: moduledoc,
       docs: docs,
-      typespecs: typespecs,
+      typespecs: typespecs, 
       relative: relative,
       source: source_link(source_path, source_url, line),
       children: nest_modules(scope, children, [], config)

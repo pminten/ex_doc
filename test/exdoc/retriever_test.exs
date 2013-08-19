@@ -75,7 +75,7 @@ defmodule ExDoc.RetrieverTest do
     assert add.type   == :def
     assert add.specs  == 
       [ ExDoc.SpecWithRefs[spec: "add(integer(), opaque()) :: integer()",
-                           locals: [:opaque],
+                           locals: [opaque: 0],
                            remotes: []] ]
   end
   
@@ -83,26 +83,26 @@ defmodule ExDoc.RetrieverTest do
     [node] = docs_from_files ["TypesAndSpecs"]
     [ opaque, public, ref ] = node.typespecs
     
-    assert opaque.name         == "opaque"
-    assert opaque.id           == "t:opaque"
+    assert opaque.name         == "opaque/0"
+    assert opaque.id           == "t:opaque/0"
     assert opaque.type         == :opaque
     assert opaque.spec.spec    == "opaque()"
     assert opaque.spec.locals  == [] 
     assert opaque.spec.remotes == []
 
-    assert public.name         == "public"
-    assert public.id           == "t:public"
+    assert public.name         == "public/1"
+    assert public.id           == "t:public/1"
     assert public.type         == :type
     assert public.spec.spec    ==
       "public(t) :: {t, String.t(), TypesAndSpecs.Sub.t(), opaque(), :ok | :error}"
-    assert public.spec.locals  == [:opaque]
-    assert public.spec.remotes == [{{String, :t}, :elixir}, {{TypesAndSpecs.Sub, :t}, :current}]
+    assert public.spec.locals  == [opaque: 0]
+    assert public.spec.remotes == [{{String, :t, 0}, :elixir}, {{TypesAndSpecs.Sub, :t, 0}, :current}]
     
-    assert ref.name            == "ref"
-    assert ref.id              == "t:ref"
+    assert ref.name            == "ref/0"
+    assert ref.id              == "t:ref/0"
     assert ref.type            == :type
     assert ref.spec.spec       == "ref() :: {:binary.part(), public(any())}"
-    assert ref.spec.locals     == [:public]
+    assert ref.spec.locals     == [public: 1]
     assert ref.spec.remotes    == []
   end
 

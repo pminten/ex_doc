@@ -4,7 +4,7 @@ defrecord ExDoc.ModuleNode, module: nil, relative: nil, moduledoc: nil,
 defrecord ExDoc.FunctionNode, name: nil, arity: 0, id: nil,
   doc: [], source: nil, type: nil, line: 0, signature: nil, specs: nil
 
-defrecord ExDoc.TypeNode, name: nil, id: nil, type: nil, spec: nil
+defrecord ExDoc.TypeNode, name: nil, arity: nil, id: nil, type: nil, spec: nil
 
 # Small helper for sharing typespec related stuff between FunctionNode and
 # TypeNode.
@@ -222,7 +222,7 @@ defmodule ExDoc.Retriever do
     { { name, arity }, line, type, signature, doc } = function
     specs = ListDict.get(all_specs, { name, arity }, [])
             |> Enum.map(&make_spec_with_refs(Kernel.Typespec.spec_to_ast(name, &1),
-                                             name, module, typenames))
+                                             { name, arity }, module, typenames))
 
     ExDoc.FunctionNode[
       name: name,
@@ -289,18 +289,20 @@ defmodule ExDoc.Retriever do
 
   defp get_types(module) do
     raw = Kernel.Typespec.beam_types(module)
-    # There are typenames to help look up what can be referred to, so don't
-    # bother including private types.
-    typenames = lc { type, {name, _, _} } inlist raw, type != :typep, do: name
-    nodes = lc { type, {name, _, _} = tup } inlist raw, type != :typep do
+    # These are typenames to help look up what can be referred to,
+    # so we don't bother including private types.
+    typenames = lc { type, {name, _, args} } inlist raw, type != :typep, do: { name, length(args) }
+    nodes = lc { type, {name, _, args} = tup } inlist raw, type != :typep do
+              arity = length(args)
               ast = process_type_ast(Kernel.Typespec.type_to_ast(tup), type)
-              spec = make_spec_with_refs(ast, name, module, typenames)
-              ExDoc.TypeNode[name: atom_to_binary(name),
-                             id: "t:#{name}",
+              spec = make_spec_with_refs(ast, { name, arity }, module, typenames)
+              ExDoc.TypeNode[name: "#{atom_to_binary(name)}/#{arity}",
+                             arity: arity,
+                             id: "t:#{name}/#{arity}",
                              type: type,
                              spec: spec] 
             end
-    { Enum.sort(nodes, &(&1.name < &2.name)), typenames }
+    { Enum.sort(nodes, &({&1.name, &1.arity} < {&2.name, &2.arity})), typenames }
   end
 
   defp source_link(_source_path, nil, _line), do: nil
@@ -315,10 +317,10 @@ defmodule ExDoc.Retriever do
     Path.relative_to source, config.source_root
   end
  
-  defp make_spec_with_refs(ast, name, module, typenames) do
+  defp make_spec_with_refs(ast, name_arity, module, typenames) do
       locals = reduce_ast(ast, [], &find_local_calls/2)
                |> Enum.uniq |> Enum.sort
-               |> Enum.filter(&(&1 in typenames and &1 != name))
+               |> Enum.filter(&(&1 in typenames and &1 != name_arity))
       remotes = reduce_ast(ast, [], &find_remote_calls/2)
                 |> Enum.uniq |> Enum.sort |> Enum.map(find_remote_call_ref(&1, module))
                 |> Enum.filter(&(&1 != nil))
@@ -329,12 +331,14 @@ defmodule ExDoc.Retriever do
 
   # Searches for local "function" calls (really type function calls) in an AST
   # produced by Kernel.Typespec.spec_to_ast or Kernel.Typespec.type_to_ast.
-  defp find_local_calls({ name, _, _ }, acc) when is_atom(name), do: [name|acc]
+  defp find_local_calls({ name, _, args }, acc) when is_atom(name) and is_list(args) do
+    [{name, length(args)}|acc]
+  end
   defp find_local_calls(_, acc), do: acc 
 
   # Searches for remote "function" calls (really type function calls) in an AST
   # produced by Kernel.Typespec.spec_to_ast or Kernel.Typespec.type_to_ast.
-  defp find_remote_calls({ {:., _, [mod, type] }, _, _ }, acc), do: [{mod, type}|acc]
+  defp find_remote_calls({ {:., _, [mod, type] }, _, args }, acc), do: [{mod, type, length(args)}|acc]
   defp find_remote_calls(_, acc), do: acc 
 
   # Recursively, in preorder, traverse the AST, working like reduce on a list.
@@ -360,9 +364,9 @@ defmodule ExDoc.Retriever do
   # tuple containing the passed type function info and either :current (for
   # current project) or :elixir (for the elixir project). If the module isn't
   # part of the current or elixir project nil is returned.
-  @spec find_remote_call_ref({ Module.t, atom }, Module.t) :: 
-    { { Module.t, atom }, :current | :elixir } | nil
-  defp find_remote_call_ref({ mod, _ } = tup, curmod) do
+  @spec find_remote_call_ref({ Module.t, atom, integer }, Module.t) :: 
+    { { Module.t, atom, integer }, :current | :elixir } | nil
+  defp find_remote_call_ref({ mod, _, _ } = tup, curmod) do
     cond do
       ebin_dir(mod)    == ebin_dir(curmod)          -> { tup, :current }
       ebin_dir(mod, 2) == ebin_dir(Kernel, 2)       -> { tup, :elixir }
